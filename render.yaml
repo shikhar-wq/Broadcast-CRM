@@ -9,6 +9,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NPM_CONFIG_PRODUCTION
+        value: "false"
       - key: SECURITY_PASSKEY
         value: HelloIntelligreen
       - key: META_WEBHOOK_VERIFY_TOKEN
