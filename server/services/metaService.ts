@@ -126,22 +126,33 @@ export const metaService = {
       throw new Error('Phone Number ID and Access Token are required to send messages.');
     }
 
-    const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
+    let cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
+    // Auto-prefix Indian country code if user entered 10 digits
+    if (cleanNumber.length === 10) {
+      cleanNumber = '91' + cleanNumber;
+    }
+
     const components: any[] = [];
 
     const isDefaultHelloWorld = template.name?.toLowerCase() === 'hello_world';
 
     if (!isDefaultHelloWorld) {
       // Header media/text parameter if applicable
-      if (template.header_type === 'IMAGE' && template.header_content) {
+      if (template.header_type === 'IMAGE') {
+        const imgLink = (template.header_content && template.header_content.startsWith('http')) 
+          ? template.header_content 
+          : 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?w=800&auto=format&fit=crop';
         components.push({
           type: 'header',
-          parameters: [{ type: 'image', image: { link: template.header_content } }]
+          parameters: [{ type: 'image', image: { link: imgLink } }]
         });
-      } else if (template.header_type === 'VIDEO' && template.header_content) {
+      } else if (template.header_type === 'VIDEO') {
+        const vidLink = (template.header_content && template.header_content.startsWith('http')) 
+          ? template.header_content 
+          : 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
         components.push({
           type: 'header',
-          parameters: [{ type: 'video', video: { link: template.header_content } }]
+          parameters: [{ type: 'video', video: { link: vidLink } }]
         });
       }
 

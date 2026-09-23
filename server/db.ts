@@ -250,7 +250,7 @@ function seedInitialData() {
       'MARKETING',
       'en_US',
       'VIDEO',
-      'https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4',
+      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
       'Hi {{1}},\n\nWatch how our turnkey smart-solar systems reduce facility electricity bills by up to 60%. Schedule your site inspection this week!',
       'IntelliGreen CleanTech Services',
       JSON.stringify([

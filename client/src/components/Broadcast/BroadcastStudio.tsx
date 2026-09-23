@@ -281,11 +281,21 @@ export const BroadcastStudio: React.FC<BroadcastStudioProps> = ({
                         </div>
 
                         <div className="flex items-center justify-between text-[11px] text-slate-500 mt-1.5">
-                          <span>{percent}% sent</span>
+                          <span>{percent}% processed</span>
                           <div className="flex items-center gap-3">
-                            <span>Sent: {camp.sent_count}</span>
+                            <span className={camp.sent_count > 0 ? 'text-white' : ''}>Sent: {camp.sent_count}</span>
                             <span className="text-slate-400">Delivered: {camp.delivered_count}</span>
                             {camp.read_count > 0 && <span className="text-emerald-400">Read: {camp.read_count}</span>}
+                            {camp.failed_count > 0 && (
+                              <span className="text-rose-400 font-semibold" title="Meta rejected or recipient unreachable">
+                                Failed: {camp.failed_count}
+                              </span>
+                            )}
+                            {camp.suppressed_count > 0 && (
+                              <span className="text-amber-400 font-medium" title="Unsubscribed/Opted-out contact">
+                                Opt-out: {camp.suppressed_count}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
