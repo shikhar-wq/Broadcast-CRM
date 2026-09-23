@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: intelligreen-wa-crm
+    runtime: node
+    plan: free # 100% Free Plan ($0/month) - No Credit Card Required
+    buildCommand: npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/settings
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SECURITY_PASSKEY
+        value: HelloIntelligreen
+      - key: META_WEBHOOK_VERIFY_TOKEN
+        value: intelligreen_secret_token_123
+      - key: META_WABA_ID
+        sync: false
+      - key: META_PHONE_NUMBER_ID
+        sync: false
+      - key: META_ACCESS_TOKEN
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: whatsapp-media
+      - key: IMAGEKIT_PUBLIC_KEY
+        sync: false
+      - key: IMAGEKIT_PRIVATE_KEY
+        sync: false
+      - key: IMAGEKIT_URL_ENDPOINT
+        sync: false

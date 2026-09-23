@@ -1,0 +1,41 @@
+{
+  "name": "intelligreenwacrm",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"cyan,green\" \"npm run server\" \"npm run client\"",
+    "server": "tsx watch server/index.ts",
+    "client": "npm --prefix client run dev",
+    "build": "npm --prefix client install && npm --prefix client run build",
+    "start": "tsx server/index.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "axios": "^1.20.0",
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.2",
+    "express": "^5.2.1",
+    "imagekit": "^6.0.0",
+    "multer": "^2.4.0",
+    "tsx": "^4.23.15",
+    "uuid": "^14.0.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^26.6.2",
+    "@types/uuid": "^10.0.0",
+    "concurrently": "^10.0.5",
+    "typescript": "^7.0.2"
+  }
+}

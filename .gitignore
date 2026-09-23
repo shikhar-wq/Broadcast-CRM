@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+client/node_modules/
+
+# Production frontend build output (compiled automatically by Render build script)
+client/dist/
+
+# Local SQLite databases and uploaded media
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+
+# Scratch & Temporary Testing Files
+scratch/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Operating System Files
+.DS_Store
+Thumbs.db
