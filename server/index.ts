@@ -341,6 +341,12 @@ app.post('/api/templates', async (req: Request, res: Response) => {
     }
 
     const cleanName = name.toLowerCase().trim().replace(/[^a-z0-9_]/g, '_');
+    if (cleanName === 'hello_world') {
+      return res.status(400).json({
+        error: "'hello_world' is a reserved system template on Meta and is already pre-approved for your account! You do not need to create it. Please use a custom name like 'intelligreen_promo' instead."
+      });
+    }
+
     const existing = db.prepare('SELECT id FROM templates WHERE name = ?').get(cleanName);
     if (existing) {
       return res.status(400).json({ error: 'A template with this name already exists.' });
@@ -415,6 +421,105 @@ app.post('/api/templates/:id/submit', async (req: Request, res: Response) => {
     } catch (err: any) {
       return res.status(400).json({ error: err.response?.data?.error?.message || err.message });
     }
+  }
+});
+
+// Sync templates directly from Meta WhatsApp Business Account
+app.post('/api/templates/sync', async (req: Request, res: Response) => {
+  try {
+    const settings = db.prepare('SELECT * FROM settings WHERE id = 1').get() as any;
+    if (!settings.waba_id || !settings.access_token) {
+      return res.status(400).json({ error: 'Meta WABA ID and Access Token must be configured in Settings to sync templates.' });
+    }
+
+    const metaData = await metaService.fetchTemplates(settings);
+    const templates = metaData?.data || [];
+    let syncedCount = 0;
+
+    for (const tpl of templates) {
+      const name = tpl.name;
+      const language = tpl.language || 'en_US';
+      const category = tpl.category || 'UTILITY';
+      const status = tpl.status || 'APPROVED';
+      const metaTemplateId = String(tpl.id || '');
+
+      let bodyText = '';
+      let headerType = 'NONE';
+      let headerContent = '';
+      let footerText = '';
+      const buttons: any[] = [];
+      const sampleValues: string[] = [];
+
+      if (Array.isArray(tpl.components)) {
+        for (const comp of tpl.components) {
+          if (comp.type === 'HEADER') {
+            headerType = comp.format || 'TEXT';
+            headerContent = comp.text || '';
+          } else if (comp.type === 'BODY') {
+            bodyText = comp.text || '';
+            if (comp.example?.body_text?.[0]) {
+              sampleValues.push(...comp.example.body_text[0]);
+            }
+          } else if (comp.type === 'FOOTER') {
+            footerText = comp.text || '';
+          } else if (comp.type === 'BUTTONS' && Array.isArray(comp.buttons)) {
+            buttons.push(...comp.buttons);
+          }
+        }
+      }
+
+      const existing = db.prepare('SELECT id FROM templates WHERE name = ?').get(name) as any;
+      const now = Date.now();
+
+      if (existing) {
+        db.prepare(`
+          UPDATE templates 
+          SET status = ?, rejection_reason = '', meta_template_id = ?, category = ?, language = ?, body_text = ?, header_type = ?, header_content = ?, footer_text = ?, buttons_json = ?, sample_values_json = ?, updated_at = ?
+          WHERE id = ?
+        `).run(
+          status, 
+          metaTemplateId, 
+          category, 
+          language, 
+          bodyText || existing.body_text || ' ', 
+          headerType, 
+          headerContent, 
+          footerText, 
+          JSON.stringify(buttons), 
+          JSON.stringify(sampleValues), 
+          now, 
+          existing.id
+        );
+      } else {
+        const id = uuidv4();
+        db.prepare(`
+          INSERT INTO templates (id, name, category, language, header_type, header_content, body_text, footer_text, buttons_json, sample_values_json, status, meta_template_id, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          id, 
+          name, 
+          category, 
+          language, 
+          headerType, 
+          headerContent, 
+          bodyText || ' ', 
+          footerText, 
+          JSON.stringify(buttons), 
+          JSON.stringify(sampleValues), 
+          status, 
+          metaTemplateId, 
+          now, 
+          now
+        );
+      }
+      syncedCount++;
+    }
+
+    const allTemplates = db.prepare('SELECT * FROM templates ORDER BY created_at DESC').all();
+    return res.json({ success: true, syncedCount, templates: allTemplates });
+  } catch (err: any) {
+    const errorMsg = err.response?.data?.error?.message || err.message;
+    return res.status(400).json({ error: `Failed to sync templates from Meta: ${errorMsg}` });
   }
 });
 
@@ -1036,6 +1141,22 @@ const handleWebhookEvents = async (req: Request, res: Response) => {
     const entry = body.entry?.[0];
     const changes = entry?.changes?.[0];
     const value = changes?.value;
+
+    // 0. Message template status updates from Meta (e.g. APPROVED, REJECTED)
+    if (changes?.field === 'message_template_status_update' && value) {
+      const status = value.event || 'APPROVED';
+      const name = value.message_template_name;
+      const metaId = String(value.message_template_id || '');
+      const reason = value.reason || '';
+
+      db.prepare(`
+        UPDATE templates 
+        SET status = ?, rejection_reason = ?, updated_at = ?
+        WHERE name = ? OR meta_template_id = ?
+      `).run(status, reason, Date.now(), name, metaId);
+
+      eventEmitter.emit('template_update', { name, status, reason, metaId });
+    }
 
     // Inbound customer messages
     if (value?.messages?.length > 0) {

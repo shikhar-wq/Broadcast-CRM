@@ -126,6 +126,15 @@ export const api = {
     return res.json();
   },
 
+  async syncTemplates(): Promise<{ success: boolean; syncedCount: number; templates: Template[] }> {
+    const res = await fetch(`${API_BASE}/templates/sync`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to sync templates from Meta');
+    }
+    return data;
+  },
+
   async sendTestTemplate(id: string, phoneNumber: string, variables: Record<string, string> = {}): Promise<any> {
     const res = await fetch(`${API_BASE}/templates/${id}/send-test`, {
       method: 'POST',

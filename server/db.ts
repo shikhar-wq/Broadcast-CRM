@@ -196,6 +196,26 @@ function seedInitialData() {
   if (count.count === 0) {
     const now = Date.now();
 
+    // 0. Official Meta pre-approved hello_world template (Available by default on all Meta WhatsApp accounts)
+    db.prepare(`
+      INSERT INTO templates (id, name, category, language, header_type, header_content, body_text, footer_text, buttons_json, sample_values_json, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      uuidv4(),
+      'hello_world',
+      'UTILITY',
+      'en_US',
+      'NONE',
+      '',
+      'Welcome and congratulations! This message demonstrates your ability to send a WhatsApp message using the Cloud API. To learn more, visit the WhatsApp Cloud API documentation for other sample apps, tutorials, and more.',
+      '',
+      '[]',
+      '[]',
+      'APPROVED',
+      now,
+      now
+    );
+
     // 1. Eco Product Launch (Approved Image Template)
     db.prepare(`
       INSERT INTO templates (id, name, category, language, header_type, header_content, body_text, footer_text, buttons_json, sample_values_json, status, created_at, updated_at)
@@ -265,6 +285,26 @@ function seedInitialData() {
       now,
       now
     );
+  }
+
+  // Ensure Meta's official pre-approved hello_world template is available and approved
+  try {
+    const hw = db.prepare("SELECT id, status FROM templates WHERE name = 'hello_world'").get() as any;
+    const officialHelloWorldBody = 'Welcome and congratulations! This message demonstrates your ability to send a WhatsApp message using the Cloud API. To learn more, visit the WhatsApp Cloud API documentation for other sample apps, tutorials, and more.';
+    if (!hw) {
+      db.prepare(`
+        INSERT INTO templates (id, name, category, language, header_type, header_content, body_text, footer_text, buttons_json, sample_values_json, status, created_at, updated_at)
+        VALUES (?, 'hello_world', 'UTILITY', 'en_US', 'NONE', '', ?, '', '[]', '[]', 'APPROVED', ?, ?)
+      `).run(uuidv4(), officialHelloWorldBody, Date.now(), Date.now());
+    } else if (hw.status === 'REJECTED') {
+      db.prepare(`
+        UPDATE templates 
+        SET status = 'APPROVED', rejection_reason = '', body_text = ?, header_type = 'NONE', header_content = '', buttons_json = '[]', sample_values_json = '[]', updated_at = ?
+        WHERE name = 'hello_world'
+      `).run(officialHelloWorldBody, Date.now());
+    }
+  } catch (e) {
+    // Ignore if table not created
   }
 
   // Seed sample contacts if empty

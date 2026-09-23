@@ -32,6 +32,24 @@ export const TemplateStudio: React.FC<TemplateStudioProps> = ({ templates, onTem
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   
+  // Sync from Meta state
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<{ text: string; isError?: boolean } | null>(null);
+
+  const handleSyncFromMeta = async () => {
+    setIsSyncing(true);
+    setSyncStatus(null);
+    try {
+      const res = await api.syncTemplates();
+      setSyncStatus({ text: `Successfully synced ${res.syncedCount} template(s) from Meta!` });
+      onTemplatesChange();
+    } catch (err: any) {
+      setSyncStatus({ text: err.message || 'Failed to sync from Meta', isError: true });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [bodyText, setBodyText] = useState('Hello {{1}},\n\nDiscover our eco-friendly solutions! Save up to 25% on your upcoming order with code: {{2}}.\n\nSchedule a consultation today.');
@@ -204,14 +222,42 @@ export const TemplateStudio: React.FC<TemplateStudioProps> = ({ templates, onTem
           </p>
         </div>
 
-        <button
-          onClick={() => setShowCreateDrawer(!showCreateDrawer)}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs transition-all shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Template</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {!isSimulationMode && (
+            <button
+              type="button"
+              onClick={handleSyncFromMeta}
+              disabled={isSyncing}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-medium text-xs transition-all border border-slate-700 disabled:opacity-50 shadow-sm"
+              title="Fetch approved templates and review status directly from Meta"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-emerald-400' : 'text-slate-400'}`} />
+              <span>{isSyncing ? 'Syncing...' : 'Sync from Meta'}</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => setShowCreateDrawer(!showCreateDrawer)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs transition-all shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Template</span>
+          </button>
+        </div>
       </div>
+
+      {/* Sync Status Banner */}
+      {syncStatus && (
+        <div className={`p-3 rounded-xl border text-xs flex items-center justify-between ${syncStatus.isError ? 'bg-rose-950/40 border-rose-800/80 text-rose-300' : 'bg-emerald-950/40 border-emerald-800/80 text-emerald-300'}`}>
+          <div className="flex items-center gap-2">
+            {syncStatus.isError ? <XCircle className="w-4 h-4 shrink-0 text-rose-400" /> : <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />}
+            <span>{syncStatus.text}</span>
+          </div>
+          <button onClick={() => setSyncStatus(null)} className="text-slate-400 hover:text-white text-xs">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Collapsible / Toggleable Creation Form & Live Mockup */}
       {showCreateDrawer && (
