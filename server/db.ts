@@ -187,172 +187,66 @@ export function initDatabase() {
     `).run(defaultWabaId, defaultPhoneId, defaultAccessToken);
   }
 
-  seedInitialData();
+  purgeLegacyDummyData();
 }
 
-function seedInitialData() {
-  // Check if templates exist
-  const count = db.prepare('SELECT COUNT(*) as count FROM templates').get() as { count: number };
-  if (count.count === 0) {
-    const now = Date.now();
-
-    // 0. Official Meta pre-approved hello_world template (Available by default on all Meta WhatsApp accounts)
-    db.prepare(`
-      INSERT INTO templates (id, name, category, language, header_type, header_content, body_text, footer_text, buttons_json, sample_values_json, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      uuidv4(),
-      'hello_world',
-      'UTILITY',
-      'en_US',
-      'NONE',
-      '',
-      'Welcome and congratulations! This message demonstrates your ability to send a WhatsApp message using the Cloud API. To learn more, visit the WhatsApp Cloud API documentation for other sample apps, tutorials, and more.',
-      '',
-      '[]',
-      '[]',
-      'APPROVED',
-      now,
-      now
-    );
-
-    // 1. Eco Product Launch (Approved Image Template)
-    db.prepare(`
-      INSERT INTO templates (id, name, category, language, header_type, header_content, body_text, footer_text, buttons_json, sample_values_json, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      uuidv4(),
-      'green_product_launch_v1',
-      'MARKETING',
-      'en_US',
-      'IMAGE',
-      'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?w=800&auto=format&fit=crop',
-      'Hello {{1}},\n\nDiscover IntelliGreen’s new eco-friendly collection! Save up to 25% on your first bulk order with code: {{2}}.\n\nCrafted with zero-waste principles for a sustainable tomorrow.',
-      'Reply STOP to unsubscribe from marketing alerts.',
-      JSON.stringify([
-        { type: 'QUICK_REPLY', text: 'Interested' },
-        { type: 'QUICK_REPLY', text: 'Chat with Agent' },
-        { type: 'QUICK_REPLY', text: 'Stop Promo' }
-      ]),
-      JSON.stringify(['Valued Customer', 'GREEN25']),
-      'APPROVED',
-      now,
-      now
-    );
-
-    // 2. Solar Installation Showcase (Approved Video Template)
-    db.prepare(`
-      INSERT INTO templates (id, name, category, language, header_type, header_content, body_text, footer_text, buttons_json, sample_values_json, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      uuidv4(),
-      'solar_energy_tour_v2',
-      'MARKETING',
-      'en_US',
-      'VIDEO',
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-      'Hi {{1}},\n\nWatch how our turnkey smart-solar systems reduce facility electricity bills by up to 60%. Schedule your site inspection this week!',
-      'IntelliGreen CleanTech Services',
-      JSON.stringify([
-        { type: 'URL', text: 'Book Free Audit', url: 'https://intelligreen.example.com/audit' },
-        { type: 'PHONE_NUMBER', text: 'Call Us', phone_number: '+919876543210' }
-      ]),
-      JSON.stringify(['Facility Director']),
-      'APPROVED',
-      now,
-      now
-    );
-
-    // 3. Pending verification template
-    db.prepare(`
-      INSERT INTO templates (id, name, category, language, header_type, header_content, body_text, footer_text, buttons_json, sample_values_json, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      uuidv4(),
-      'sustainability_webinar_invite',
-      'MARKETING',
-      'en_US',
-      'TEXT',
-      'Exclusive Sustainability Summit 2026',
-      'Dear {{1}},\n\nYou are cordially invited to our exclusive webinar on "Zero-Emission Commercial Facilities" on October 15th at {{2}}.\n\nConfirm your seat before slots fill up!',
-      'IntelliGreen Webinars',
-      JSON.stringify([
-        { type: 'QUICK_REPLY', text: 'RSVP Yes' },
-        { type: 'QUICK_REPLY', text: 'Cannot Attend' }
-      ]),
-      JSON.stringify(['Partner', '4:00 PM IST']),
-      'PENDING',
-      now,
-      now
-    );
-  }
-
-  // Ensure Meta's official pre-approved hello_world template is available and approved
+export function purgeLegacyDummyData() {
   try {
-    const hw = db.prepare("SELECT id, status FROM templates WHERE name = 'hello_world'").get() as any;
-    const officialHelloWorldBody = 'Welcome and congratulations! This message demonstrates your ability to send a WhatsApp message using the Cloud API. To learn more, visit the WhatsApp Cloud API documentation for other sample apps, tutorials, and more.';
-    if (!hw) {
-      db.prepare(`
-        INSERT INTO templates (id, name, category, language, header_type, header_content, body_text, footer_text, buttons_json, sample_values_json, status, created_at, updated_at)
-        VALUES (?, 'hello_world', 'UTILITY', 'en_US', 'NONE', '', ?, '', '[]', '[]', 'APPROVED', ?, ?)
-      `).run(uuidv4(), officialHelloWorldBody, Date.now(), Date.now());
-    } else if (hw.status === 'REJECTED') {
-      db.prepare(`
-        UPDATE templates 
-        SET status = 'APPROVED', rejection_reason = '', body_text = ?, header_type = 'NONE', header_content = '', buttons_json = '[]', sample_values_json = '[]', updated_at = ?
-        WHERE name = 'hello_world'
-      `).run(officialHelloWorldBody, Date.now());
-    }
-  } catch (e) {
-    // Ignore if table not created
-  }
-
-  // Seed sample contacts if empty
-  const contactCount = db.prepare('SELECT COUNT(*) as count FROM contacts').get() as { count: number };
-  if (contactCount.count === 0) {
-    const now = Date.now();
-    const initialContacts = [
-      { name: 'Arjun Mehta', phone: '+919876543211', vars: { 1: 'Arjun', 2: 'GREEN25' }, tag: 'VIP Client' },
-      { name: 'Pooja Sharma', phone: '+919876543212', vars: { 1: 'Pooja', 2: 'GREEN25' }, tag: 'Solar Prospect' },
-      { name: 'Vikram Singh', phone: '+919876543213', vars: { 1: 'Vikram', 2: 'GREEN25' }, tag: 'Industrial' },
-      { name: 'Neha Rao', phone: '+919876543214', vars: { 1: 'Neha', 2: 'GREEN25' }, tag: 'Eco Lead' },
-      { name: 'David Miller', phone: '+14155552671', vars: { 1: 'David', 2: 'GREEN25' }, tag: 'International' },
-      { name: 'Rohan Gupta', phone: '+919876543216', vars: { 1: 'Rohan', 2: 'GREEN25' }, tag: 'General' },
-      { name: 'Ananya Verma', phone: '+919876543217', vars: { 1: 'Ananya', 2: 'GREEN25' }, tag: 'VIP Client' },
-      { name: 'Karan Malhotra', phone: '+919876543218', vars: { 1: 'Karan', 2: 'GREEN25' }, tag: 'Solar Prospect' },
-      { name: 'Sneha Joshi', phone: '+919876543219', vars: { 1: 'Sneha', 2: 'GREEN25' }, tag: 'General' },
-      { name: 'Sameer Patel', phone: '+919876543220', vars: { 1: 'Sameer', 2: 'GREEN25' }, tag: 'Industrial' }
+    // 1. Remove legacy dummy contacts and their associated dummy conversations/messages
+    const dummyPhones = [
+      '+919876543211',
+      '+919876543212',
+      '+919876543213',
+      '+919876543214',
+      '+14155552671',
+      '+919876543216',
+      '+919876543217',
+      '+919876543218',
+      '+919876543219',
+      '+919876543220'
     ];
 
-    const insertContact = db.prepare(`
-      INSERT INTO contacts (id, name, phone_number, variables_json, tags, is_opted_out, created_at)
-      VALUES (?, ?, ?, ?, ?, 0, ?)
-    `);
+    const placeholders = dummyPhones.map(() => '?').join(',');
+    const dummyContacts = db.prepare(`SELECT id FROM contacts WHERE phone_number IN (${placeholders})`).all(...dummyPhones) as { id: string }[];
 
-    for (const c of initialContacts) {
-      insertContact.run(uuidv4(), c.name, c.phone, JSON.stringify(c.vars), c.tag, now);
+    if (dummyContacts.length > 0) {
+      const dummyIds = dummyContacts.map(c => c.id);
+      const idPlaceholders = dummyIds.map(() => '?').join(',');
+
+      // Delete chat messages of dummy conversations
+      const dummyConvs = db.prepare(`SELECT id FROM conversations WHERE contact_id IN (${idPlaceholders})`).all(...dummyIds) as { id: string }[];
+      if (dummyConvs.length > 0) {
+        const convPlaceholders = dummyConvs.map(() => '?').join(',');
+        db.prepare(`DELETE FROM chat_messages WHERE conversation_id IN (${convPlaceholders})`).run(...dummyConvs.map(c => c.id));
+        db.prepare(`DELETE FROM conversations WHERE id IN (${convPlaceholders})`).run(...dummyConvs.map(c => c.id));
+      }
+
+      // Delete campaign messages for dummy contacts
+      db.prepare(`DELETE FROM campaign_messages WHERE contact_id IN (${idPlaceholders})`).run(...dummyIds);
+      // Delete dummy contacts
+      db.prepare(`DELETE FROM contacts WHERE id IN (${idPlaceholders})`).run(...dummyIds);
     }
 
-    // Seed 1 active conversation in Query Tab
-    const firstContact = db.prepare('SELECT * FROM contacts LIMIT 1').get() as any;
-    if (firstContact) {
-      const convId = uuidv4();
-      const serviceExpires = now + 24 * 60 * 60 * 1000 - 15 * 60 * 1000; // 23h 45m left
-      db.prepare(`
-        INSERT INTO conversations (id, contact_id, contact_name, phone_number, last_message_text, last_message_at, service_window_expires_at, unread_count)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-      `).run(convId, firstContact.id, firstContact.name, firstContact.phone_number, 'Hello! Is this discount applicable for 500+ units purchase?', now - 60000, serviceExpires);
-
-      db.prepare(`
-        INSERT INTO chat_messages (id, conversation_id, direction, message_type, content, timestamp, status)
-        VALUES (?, ?, 'OUTBOUND', 'template', 'Discover IntelliGreen’s new eco-friendly collection! Save up to 25% on your first bulk order with code: GREEN25.', ?, 'delivered')
-      `).run(uuidv4(), convId, now - 3600000);
-
-      db.prepare(`
-        INSERT INTO chat_messages (id, conversation_id, direction, message_type, content, timestamp, status)
-        VALUES (?, ?, 'INBOUND', 'text', 'Hello! Is this discount applicable for 500+ units purchase?', ?, 'delivered')
-      `).run(uuidv4(), convId, now - 60000);
+    // 2. Remove legacy dummy templates that were never registered on Meta
+    const dummyTemplateNames = [
+      'green_product_launch_v1',
+      'solar_energy_tour_v2',
+      'sustainability_webinar_invite'
+    ];
+    for (const tplName of dummyTemplateNames) {
+      const tpl = db.prepare("SELECT id, meta_template_id FROM templates WHERE name = ?").get(tplName) as any;
+      if (tpl && (!tpl.meta_template_id || tpl.meta_template_id === '')) {
+        // Delete any campaigns using this dummy template first
+        const dummyCamps = db.prepare("SELECT id FROM campaigns WHERE template_id = ?").all(tpl.id) as { id: string }[];
+        for (const camp of dummyCamps) {
+          db.prepare("DELETE FROM campaign_messages WHERE campaign_id = ?").run(camp.id);
+          db.prepare("DELETE FROM campaigns WHERE id = ?").run(camp.id);
+        }
+        db.prepare("DELETE FROM templates WHERE id = ?").run(tpl.id);
+      }
     }
+  } catch (e) {
+    // Ignore if tables are being initialized
   }
 }
 

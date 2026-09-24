@@ -127,8 +127,11 @@ export const metaService = {
     }
 
     let cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
-    // Auto-prefix Indian country code if user entered 10 digits
-    if (cleanNumber.length === 10) {
+    // Strip leading zero and prefix Indian country code if 11 digits (e.g. 09876543210 -> 919876543210)
+    if (cleanNumber.length === 11 && cleanNumber.startsWith('0')) {
+      cleanNumber = '91' + cleanNumber.slice(1);
+    } else if (cleanNumber.length === 10) {
+      // Auto-prefix Indian country code if user entered 10 digits
       cleanNumber = '91' + cleanNumber;
     }
 

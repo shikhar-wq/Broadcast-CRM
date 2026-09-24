@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Check, Calculator, Cloud, ExternalLink, RefreshCw, AlertCircle, CheckCircle2, 
   HardDrive, Server, Eye, EyeOff, Trash2, Clipboard, KeyRound, HelpCircle, 
-  ChevronDown, ChevronUp, ShieldCheck 
+  ChevronDown, ChevronUp, ShieldCheck, Download, Upload 
 } from 'lucide-react';
 import { AppSettings } from '../../types';
 import { api } from '../../api';
@@ -771,6 +771,59 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSettings
               <p className="text-slate-400">
                 IntelliGreen WA CRM charges <strong>$0 monthly fees</strong> and $0 markup. The first <strong>1,000 customer service chats each month are free</strong> directly from Meta. You pay only raw Meta delivery fees!
               </p>
+            </div>
+
+            {/* Database Backup & Restore Card */}
+            <div className="pt-3 border-t border-slate-800/80 space-y-2.5">
+              <div className="flex items-center gap-1.5">
+                <HardDrive className="w-4 h-4 text-emerald-400" />
+                <span className="text-xs font-semibold text-white">Permanent Data Backup & Restore</span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                When Supabase credentials are configured above, your database automatically syncs to the cloud across server restarts. You can also manually export or restore a full snapshot anytime:
+              </p>
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <a
+                  href="/api/backup/export"
+                  download
+                  className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-all"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Download Backup</span>
+                </a>
+
+                <label className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer">
+                  <Upload className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Restore Backup</span>
+                  <input
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const text = await file.text();
+                        const json = JSON.parse(text);
+                        const res = await fetch('/api/backup/import', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(json),
+                        });
+                        const data = await res.json();
+                        if (res.ok) {
+                          alert('Database restored successfully! Refreshing app...');
+                          window.location.reload();
+                        } else {
+                          alert(data.error || 'Failed to restore backup.');
+                        }
+                      } catch (err: any) {
+                        alert('Invalid backup JSON file.');
+                      }
+                    }}
+                  />
+                </label>
+              </div>
             </div>
           </div>
         </div>

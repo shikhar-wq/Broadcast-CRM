@@ -6,13 +6,14 @@ import fs from 'fs';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 
-import db, { initDatabase } from './db.ts';
+import db, { initDatabase, purgeLegacyDummyData } from './db.ts';
 import { eventEmitter } from './services/eventBus.ts';
 import { metaService } from './services/metaService.ts';
 import { simulationService } from './services/simulationService.ts';
 import { broadcastQueue } from './services/broadcastQueue.ts';
 import { mediaService, ALLOWED_MIME_TYPES } from './services/mediaService.ts';
 import { retentionService } from './services/retentionService.ts';
+import { cloudSyncService } from './services/cloudSyncService.ts';
 
 dotenv.config();
 
@@ -22,6 +23,16 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '60mb' }));
+
+// Automatically trigger background cloud backup after any successful data modification
+app.use((req, res, next) => {
+  res.on('finish', () => {
+    if (['POST', 'PUT', 'DELETE'].includes(req.method) && res.statusCode < 400 && (req.path.startsWith('/api/') || req.path.startsWith('/webhook'))) {
+      cloudSyncService.scheduleBackup();
+    }
+  });
+  next();
+});
 
 // Ensure upload directory exists
 const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
@@ -52,8 +63,46 @@ const upload = multer({
   }
 });
 
-// Initialize database
+// Initialize database and restore from cloud snapshot if available
 initDatabase();
+cloudSyncService.restoreFromSupabaseOnBoot().then(() => {
+  purgeLegacyDummyData();
+});
+
+// Database Backup & Restore Endpoints
+app.get('/api/backup/export', (req: Request, res: Response) => {
+  try {
+    const snapshot = cloudSyncService.exportFullDatabase();
+    res.setHeader('Content-Disposition', `attachment; filename="intelligreen-crm-backup-${Date.now()}.json"`);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(snapshot, null, 2));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/backup/import', (req: Request, res: Response) => {
+  try {
+    cloudSyncService.importFullDatabase(req.body);
+    cloudSyncService.scheduleBackup();
+    res.json({ success: true, message: 'Database restored successfully!' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/backup/restore-cloud', async (req: Request, res: Response) => {
+  try {
+    const restored = await cloudSyncService.restoreFromSupabaseOnBoot();
+    if (restored) {
+      res.json({ success: true, message: 'Restored latest snapshot from Supabase Cloud Storage!' });
+    } else {
+      res.status(404).json({ error: 'No snapshot found in Supabase bucket or credentials not set.' });
+    }
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
 // ----------------------------------------------------
 // 1. SETTINGS & MEDIA UPLOAD ENDPOINTS
@@ -702,11 +751,19 @@ app.post('/api/contacts', (req: Request, res: Response) => {
   }
 
   const trimmedName = name.trim();
-  const rawDigits = phone_number.replace(/[^0-9]/g, '');
+  let rawDigits = phone_number.replace(/[^0-9]/g, '');
   if (!rawDigits || rawDigits.length < 7) {
     return res.status(400).json({ error: 'Please enter a valid phone number with country code (e.g. +919876543210).' });
   }
-  const cleanPhone = phone_number.trim().startsWith('+') ? `+${rawDigits}` : `+${rawDigits}`;
+
+  // Strip leading zero if 11 digits (e.g. 09876543210 -> 919876543210)
+  if (rawDigits.length === 11 && rawDigits.startsWith('0')) {
+    rawDigits = '91' + rawDigits.slice(1);
+  } else if (rawDigits.length === 10) {
+    // Auto-prefix Indian country code if user entered 10 digits
+    rawDigits = '91' + rawDigits;
+  }
+  const cleanPhone = `+${rawDigits}`;
 
   try {
     // Check if contact already exists by full number, digits, or last 10 digits

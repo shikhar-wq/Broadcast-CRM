@@ -232,17 +232,28 @@ export const BroadcastStudio: React.FC<BroadcastStudioProps> = ({
                   const isPaused = camp.status === 'PAUSED';
                   const isCompleted = camp.status === 'COMPLETED';
 
+                  const isSelected = selectedCampaignId === camp.id;
+
                   return (
-                    <div key={camp.id} className="py-3.5 space-y-2.5 first:pt-0 last:pb-0">
+                    <div 
+                      key={camp.id} 
+                      className="py-3.5 space-y-2.5 first:pt-0 last:pb-0 hover:bg-slate-800/20 p-2.5 rounded-xl transition-all border border-transparent hover:border-slate-800/80 cursor-pointer"
+                      onClick={() => setSelectedCampaignId(isSelected ? null : camp.id)}
+                    >
                       <div className="flex items-center justify-between">
                         <div>
-                          <h3 className="font-semibold text-xs text-white">{camp.name}</h3>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-semibold text-xs text-white">{camp.name}</h3>
+                            <span className="text-[10px] text-slate-500 hover:text-slate-300">
+                              {isSelected ? '▲ Hide logs' : '▼ View logs'}
+                            </span>
+                          </div>
                           <span className="text-[11px] text-slate-400">
                             {camp.template_name} · {camp.total_contacts} contacts
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                           {isRunning && (
                             <button
                               onClick={() => api.pauseCampaign(camp.id).then(onCampaignsChange)}
@@ -299,6 +310,42 @@ export const BroadcastStudio: React.FC<BroadcastStudioProps> = ({
                           </div>
                         </div>
                       </div>
+
+                      {/* Expandable Per-Recipient Delivery Logs */}
+                      {isSelected && campaignDetails && campaignDetails.campaign?.id === camp.id && (
+                        <div 
+                          className="mt-2.5 p-3 bg-slate-950/90 rounded-xl border border-slate-800 text-xs space-y-2 animate-in fade-in"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center justify-between font-semibold text-slate-300 border-b border-slate-800/80 pb-1.5">
+                            <span>Recipient Delivery Details ({campaignDetails.messages?.length || 0})</span>
+                            <span className="text-[10px] text-slate-500 font-normal">Click campaign to close</span>
+                          </div>
+                          <div className="space-y-2 max-h-56 overflow-y-auto divide-y divide-slate-900 pr-1">
+                            {campaignDetails.messages?.map((m: any) => (
+                              <div key={m.id} className="pt-2 flex items-start justify-between gap-2">
+                                <div className="space-y-0.5">
+                                  <span className="font-mono text-white text-[11px]">{m.phone_number}</span>
+                                  {m.error_message && (
+                                    <p className="text-[10px] text-rose-400 leading-tight">
+                                      ⚠️ {m.error_message}
+                                    </p>
+                                  )}
+                                </div>
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 uppercase tracking-wider ${
+                                  m.status === 'delivered' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                                  m.status === 'sent' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                                  m.status === 'read' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                                  m.status === 'suppressed' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                                  'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                }`}>
+                                  {m.status}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
