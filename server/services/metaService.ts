@@ -120,6 +120,49 @@ export const metaService = {
     return response.data;
   },
 
+  // Cache of live Meta template schemas by template name (5 minute TTL)
+  _liveTemplateCache: new Map<string, { fetchedAt: number; data: any }>(),
+
+  async getLiveTemplateSchema(templateName: string, preferredLanguage: string, settings: MetaSettings): Promise<any | null> {
+    if (!settings.waba_id || !settings.access_token || !templateName) return null;
+    const cacheKey = `${settings.waba_id}:${templateName}:${preferredLanguage || ''}`;
+    const cached = this._liveTemplateCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < 5 * 60 * 1000) {
+      return cached.data;
+    }
+
+    try {
+      const url = `${GRAPH_BASE_URL}/${settings.waba_id}/message_templates?name=${encodeURIComponent(templateName)}`;
+      const res = await axios.get(url, {
+        headers: { Authorization: `Bearer ${settings.access_token}` }
+      });
+      const list: any[] = res.data?.data || [];
+      if (list.length === 0) return null;
+
+      // Prefer exact language match & APPROVED status
+      const matched =
+        list.find(t => t.language === preferredLanguage && t.status === 'APPROVED') ||
+        list.find(t => t.status === 'APPROVED') ||
+        list[0];
+
+      if (matched) {
+        this._liveTemplateCache.set(cacheKey, { fetchedAt: Date.now(), data: matched });
+      }
+      return matched || null;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  // Sanitize template parameter text (Meta rejects newlines, tabs, >4 consecutive spaces, or empty strings with #132012)
+  sanitizeParamText(val: any, fallback: string = 'Val'): string {
+    const str = String(val ?? '')
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/\s{4,}/g, '   ')
+      .trim();
+    return str.length > 0 ? str : fallback;
+  },
+
   // 3. Send a single template message to a recipient
   async sendTemplateMessage(phoneNumber: string, template: any, variables: Record<string, string>, settings: MetaSettings) {
     if (!settings.phone_number_id || !settings.access_token) {
@@ -136,46 +179,254 @@ export const metaService = {
     }
 
     const components: any[] = [];
-
     const isDefaultHelloWorld = template.name?.toLowerCase() === 'hello_world';
 
+    // Fetch exact live template structure from Meta so header/body/button formats & NAMED vs POSITIONAL match 100%
+    const liveMetaTpl = await this.getLiveTemplateSchema(template.name, template.language, settings);
+    const resolvedLanguage = liveMetaTpl?.language || template.language || 'en_US';
+    const parameterFormat = (liveMetaTpl?.parameter_format || 'POSITIONAL').toUpperCase();
+    const contactName = variables['_contact_name'] || variables['name'] || variables['customer_name'] || '';
+
+    const localSampleValues: string[] = typeof template.sample_values_json === 'string'
+      ? JSON.parse(template.sample_values_json || '[]')
+      : (Array.isArray(template.sample_values_json) ? template.sample_values_json : []);
+
     if (!isDefaultHelloWorld) {
-      // Header media/text parameter if applicable
-      if (template.header_type === 'IMAGE') {
-        const imgLink = (template.header_content && template.header_content.startsWith('http')) 
-          ? template.header_content 
-          : 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?w=800&auto=format&fit=crop';
-        components.push({
-          type: 'header',
-          parameters: [{ type: 'image', image: { link: imgLink } }]
-        });
-      } else if (template.header_type === 'VIDEO') {
-        const vidLink = (template.header_content && template.header_content.startsWith('http')) 
-          ? template.header_content 
-          : 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-        components.push({
-          type: 'header',
-          parameters: [{ type: 'video', video: { link: vidLink } }]
-        });
-      }
+      if (liveMetaTpl && Array.isArray(liveMetaTpl.components)) {
+        // Build components strictly according to Meta's live created template schema
+        for (const comp of liveMetaTpl.components) {
+          const compType = (comp.type || '').toUpperCase();
 
-      // Body variables
-      const bodyParams: any[] = [];
-      // Extract variables {{1}}, {{2}} in order
-      const matches = template.body_text?.match(/{{\s*(\d+)\s*}}/g) || [];
-      for (let i = 1; i <= matches.length; i++) {
-        const val = variables[i.toString()] || variables[i] || `Var${i}`;
-        bodyParams.push({
-          type: 'text',
-          text: val
-        });
-      }
+          if (compType === 'HEADER') {
+            const format = (comp.format || 'TEXT').toUpperCase();
+            if (format === 'IMAGE') {
+              const imgLink = (template.header_content && template.header_content.startsWith('http'))
+                ? template.header_content
+                : 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?w=800&auto=format&fit=crop';
+              components.push({
+                type: 'header',
+                parameters: [{ type: 'image', image: { link: imgLink } }]
+              });
+            } else if (format === 'VIDEO') {
+              const vidLink = (template.header_content && template.header_content.startsWith('http'))
+                ? template.header_content
+                : 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+              components.push({
+                type: 'header',
+                parameters: [{ type: 'video', video: { link: vidLink } }]
+              });
+            } else if (format === 'DOCUMENT') {
+              const docLink = (template.header_content && template.header_content.startsWith('http'))
+                ? template.header_content
+                : 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf';
+              components.push({
+                type: 'header',
+                parameters: [{ type: 'document', document: { link: docLink, filename: 'Order_Receipt.pdf' } }]
+              });
+            } else if (format === 'TEXT' && comp.text) {
+              // Check if header text contains variables like {{1}} or {{order_id}}
+              const namedHeaderExamples: any[] = comp.example?.header_text_named_params || [];
+              const posHeaderExamples: string[] = comp.example?.header_text || [];
+              const rawMatches = [...comp.text.matchAll(/{{\s*([a-zA-Z0-9_]+)\s*}}/g)].map((m: any) => m[1]);
 
-      if (bodyParams.length > 0) {
-        components.push({
-          type: 'body',
-          parameters: bodyParams
-        });
+              if (namedHeaderExamples.length > 0 || (parameterFormat === 'NAMED' && rawMatches.length > 0)) {
+                const paramNames = namedHeaderExamples.length > 0
+                  ? namedHeaderExamples.map((e: any) => e.param_name)
+                  : Array.from(new Set(rawMatches));
+                const headerParams = paramNames.map((pName: string, idx: number) => {
+                  const exVal = namedHeaderExamples.find((e: any) => e.param_name === pName)?.example;
+                  const val = variables[pName] || exVal || contactName || `Ref-${idx + 1}`;
+                  return {
+                    type: 'text',
+                    parameter_name: pName,
+                    text: this.sanitizeParamText(val, `Ref-${idx + 1}`)
+                  };
+                });
+                if (headerParams.length > 0) {
+                  components.push({ type: 'header', parameters: headerParams });
+                }
+              } else if (rawMatches.length > 0 || posHeaderExamples.length > 0) {
+                const count = Math.max(rawMatches.length, posHeaderExamples.length);
+                const headerParams = [];
+                for (let i = 1; i <= count; i++) {
+                  const val = variables[`header_${i}`] || posHeaderExamples[i - 1] || variables[String(i)] || `100${i}`;
+                  headerParams.push({
+                    type: 'text',
+                    text: this.sanitizeParamText(val, `100${i}`)
+                  });
+                }
+                if (headerParams.length > 0) {
+                  components.push({ type: 'header', parameters: headerParams });
+                }
+              }
+            }
+          } else if (compType === 'BODY') {
+            const bodyText = comp.text || template.body_text || '';
+            const namedBodyExamples: any[] = comp.example?.body_text_named_params || [];
+            const posBodyExamples: string[] = comp.example?.body_text?.[0] || localSampleValues;
+            const rawMatches = [...bodyText.matchAll(/{{\s*([a-zA-Z0-9_]+)\s*}}/g)].map((m: any) => m[1]);
+            const hasNonNumericVar = rawMatches.some((v: string) => !/^\d+$/.test(v));
+
+            if (namedBodyExamples.length > 0 || parameterFormat === 'NAMED' || hasNonNumericVar) {
+              const paramNames = namedBodyExamples.length > 0
+                ? namedBodyExamples.map((e: any) => e.param_name)
+                : Array.from(new Set(rawMatches));
+              const bodyParams = paramNames.map((pName: string, idx: number) => {
+                const exVal = namedBodyExamples.find((e: any) => e.param_name === pName)?.example;
+                const isNameField = /name|customer|user|client|recipient/i.test(pName);
+                const val =
+                  variables[pName] ||
+                  (isNameField && contactName ? contactName : '') ||
+                  exVal ||
+                  posBodyExamples[idx] ||
+                  (idx === 0 && contactName ? contactName : `Value ${idx + 1}`);
+                return {
+                  type: 'text',
+                  parameter_name: pName,
+                  text: this.sanitizeParamText(val, `Value ${idx + 1}`)
+                };
+              });
+              if (bodyParams.length > 0) {
+                components.push({ type: 'body', parameters: bodyParams });
+              }
+            } else if (rawMatches.length > 0 || posBodyExamples.length > 0) {
+              const maxIndex = rawMatches.reduce((max: number, cur: string) => {
+                const n = parseInt(cur, 10);
+                return !isNaN(n) && n > max ? n : max;
+              }, 0);
+              const count = Math.max(maxIndex, posBodyExamples.length);
+              const bodyParams = [];
+              for (let i = 1; i <= count; i++) {
+                const val =
+                  variables[String(i)] ||
+                  (i === 1 && contactName ? contactName : '') ||
+                  posBodyExamples[i - 1] ||
+                  localSampleValues[i - 1] ||
+                  (i === 1 ? 'Valued Customer' : `100${i}`);
+                bodyParams.push({
+                  type: 'text',
+                  text: this.sanitizeParamText(val, `100${i}`)
+                });
+              }
+              if (bodyParams.length > 0) {
+                components.push({ type: 'body', parameters: bodyParams });
+              }
+            }
+          } else if (compType === 'BUTTONS' && Array.isArray(comp.buttons)) {
+            comp.buttons.forEach((btn: any, index: number) => {
+              const bType = (btn.type || '').toUpperCase();
+              if (bType === 'URL' && typeof btn.url === 'string' && btn.url.includes('{{')) {
+                const urlParamVal =
+                  variables[`button_url_${index}`] ||
+                  variables['button_url'] ||
+                  (Array.isArray(btn.example) ? btn.example[0] : btn.example) ||
+                  '1001';
+                components.push({
+                  type: 'button',
+                  sub_type: 'url',
+                  index: String(index),
+                  parameters: [
+                    {
+                      type: 'text',
+                      text: this.sanitizeParamText(urlParamVal, '1001')
+                    }
+                  ]
+                });
+              } else if (bType === 'COPY_CODE') {
+                const codeVal =
+                  variables['coupon_code'] ||
+                  (Array.isArray(btn.example) ? btn.example[0] : btn.example) ||
+                  'INTELLIGREEN';
+                components.push({
+                  type: 'button',
+                  sub_type: 'copy_code',
+                  index: String(index),
+                  parameters: [
+                    {
+                      type: 'coupon_code',
+                      coupon_code: this.sanitizeParamText(codeVal, 'INTELLIGREEN')
+                    }
+                  ]
+                });
+              }
+            });
+          }
+        }
+      } else {
+        // Fallback when live template lookup is unavailable
+        if (template.header_type === 'IMAGE') {
+          const imgLink = (template.header_content && template.header_content.startsWith('http'))
+            ? template.header_content
+            : 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?w=800&auto=format&fit=crop';
+          components.push({
+            type: 'header',
+            parameters: [{ type: 'image', image: { link: imgLink } }]
+          });
+        } else if (template.header_type === 'VIDEO') {
+          const vidLink = (template.header_content && template.header_content.startsWith('http'))
+            ? template.header_content
+            : 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+          components.push({
+            type: 'header',
+            parameters: [{ type: 'video', video: { link: vidLink } }]
+          });
+        } else if (template.header_type === 'DOCUMENT') {
+          const docLink = (template.header_content && template.header_content.startsWith('http'))
+            ? template.header_content
+            : 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf';
+          components.push({
+            type: 'header',
+            parameters: [{ type: 'document', document: { link: docLink, filename: 'Order_Receipt.pdf' } }]
+          });
+        } else if (template.header_type === 'TEXT' && template.header_content) {
+          const hdrMatches = [...template.header_content.matchAll(/{{\s*([a-zA-Z0-9_]+)\s*}}/g)].map((m: any) => m[1]);
+          if (hdrMatches.length > 0) {
+            const headerParams = hdrMatches.map((m: string, idx: number) => {
+              const isNamed = !/^\d+$/.test(m);
+              const val = variables[m] || contactName || `Ref-${idx + 1}`;
+              return isNamed
+                ? { type: 'text', parameter_name: m, text: this.sanitizeParamText(val) }
+                : { type: 'text', text: this.sanitizeParamText(val) };
+            });
+            components.push({ type: 'header', parameters: headerParams });
+          }
+        }
+
+        // Body variables (supports both {{1}} positional and {{name}} named placeholders)
+        const rawBodyMatches = [...(template.body_text || '').matchAll(/{{\s*([a-zA-Z0-9_]+)\s*}}/g)].map((m: any) => m[1]);
+        if (rawBodyMatches.length > 0) {
+          const hasNamed = rawBodyMatches.some((m: string) => !/^\d+$/.test(m));
+          if (hasNamed) {
+            const uniqueNames = Array.from(new Set(rawBodyMatches));
+            const bodyParams = uniqueNames.map((pName: string, idx: number) => {
+              const val = variables[pName] || localSampleValues[idx] || (idx === 0 && contactName ? contactName : `Value ${idx + 1}`);
+              return {
+                type: 'text',
+                parameter_name: pName,
+                text: this.sanitizeParamText(val, `Value ${idx + 1}`)
+              };
+            });
+            components.push({ type: 'body', parameters: bodyParams });
+          } else {
+            const maxIndex = rawBodyMatches.reduce((max: number, cur: string) => {
+              const n = parseInt(cur, 10);
+              return !isNaN(n) && n > max ? n : max;
+            }, 0);
+            const bodyParams = [];
+            for (let i = 1; i <= maxIndex; i++) {
+              const val =
+                variables[String(i)] ||
+                (i === 1 && contactName ? contactName : '') ||
+                localSampleValues[i - 1] ||
+                (i === 1 ? 'Valued Customer' : `100${i}`);
+              bodyParams.push({
+                type: 'text',
+                text: this.sanitizeParamText(val, `100${i}`)
+              });
+            }
+            components.push({ type: 'body', parameters: bodyParams });
+          }
+        }
       }
     }
 
@@ -186,7 +437,7 @@ export const metaService = {
       type: 'template',
       template: {
         name: template.name,
-        language: { code: template.language || 'en_US' }
+        language: { code: resolvedLanguage }
       }
     };
 

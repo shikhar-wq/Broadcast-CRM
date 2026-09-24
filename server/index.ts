@@ -503,11 +503,13 @@ app.post('/api/templates/sync', async (req: Request, res: Response) => {
         for (const comp of tpl.components) {
           if (comp.type === 'HEADER') {
             headerType = comp.format || 'TEXT';
-            headerContent = comp.text || '';
+            headerContent = comp.text || (comp.example?.header_handle?.[0] || '');
           } else if (comp.type === 'BODY') {
             bodyText = comp.text || '';
             if (comp.example?.body_text?.[0]) {
               sampleValues.push(...comp.example.body_text[0]);
+            } else if (Array.isArray(comp.example?.body_text_named_params)) {
+              sampleValues.push(...comp.example.body_text_named_params.map((p: any) => p.example || p.param_name));
             }
           } else if (comp.type === 'FOOTER') {
             footerText = comp.text || '';
@@ -679,7 +681,9 @@ app.post('/api/templates/:id/send-test', async (req: Request, res: Response) => 
           message: `Success! Template delivered directly to your WhatsApp at ${cleanPhone} via Meta Cloud API.`
         });
       } catch (err: any) {
-        const errorMsg = err.response?.data?.error?.message || err.message;
+        const baseMsg = err.response?.data?.error?.message || err.message;
+        const details = err.response?.data?.error?.error_data?.details;
+        const errorMsg = details ? `${baseMsg} (${details})` : baseMsg;
         return res.status(400).json({
           success: false,
           error: `Meta delivery error: ${errorMsg} (Hint: If using a Meta Developer Test Number, verify that ${cleanPhone} is added to your recipient list in the Meta App Dashboard).`

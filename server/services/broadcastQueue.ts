@@ -62,7 +62,7 @@ export const broadcastQueue = {
 
     // Fetch next queued message
     const msg = db.prepare(`
-      SELECT cm.*, c.is_opted_out, c.variables_json
+      SELECT cm.*, c.name as contact_name, c.is_opted_out, c.variables_json
       FROM campaign_messages cm
       JOIN contacts c ON cm.contact_id = c.id
       WHERE cm.campaign_id = ? AND cm.status = 'queued'
@@ -92,6 +92,9 @@ export const broadcastQueue = {
 
     const now = Date.now();
     const variables = msg.variables_json ? JSON.parse(msg.variables_json) : {};
+    if (msg.contact_name && !variables['_contact_name']) {
+      variables['_contact_name'] = msg.contact_name;
+    }
 
     if (settings.mode === 'SIMULATION') {
       // Simulation dispatch
@@ -164,7 +167,9 @@ export const broadcastQueue = {
 
         eventEmitter.emit('campaign_progress', { campaignId, messageId: msg.id, status: 'sent' });
       } catch (err: any) {
-        const errMsg = err.response?.data?.error?.message || err.message || 'Dispatch error';
+        const baseMsg = err.response?.data?.error?.message || err.message || 'Dispatch error';
+        const errDetails = err.response?.data?.error?.error_data?.details;
+        const errMsg = errDetails ? `${baseMsg} (${errDetails})` : baseMsg;
         const errCode = err.response?.data?.error?.code;
 
         db.prepare('UPDATE campaign_messages SET status = ?, error_message = ? WHERE id = ?')
